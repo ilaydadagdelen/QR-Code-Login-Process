@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login & Register</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <div class="row justify-content-center">
+            <div class="col-md-6">
+                <ul class="nav nav-tabs" id="myTab" role="tablist">
+                    <li class="nav-item">
+                        <button class="nav-link active" id="login-tab" data-bs-toggle="tab" data-bs-target="#login" type="button">Login</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" id="register-tab" data-bs-toggle="tab" data-bs-target="#register" type="button">Register</button>
+                    </li>
+                </ul>
+                <div class="tab-content">
+                    <!-- Login Tab -->
+                    <div class="tab-pane fade show active" id="login">
+                        <form class="mt-3" onsubmit="handleLogin(event)">
+                            <div class="mb-3">
+                                <label for="loginEmail" class="form-label">Email address</label>
+                                <input type="email" class="form-control" id="loginEmail" placeholder="Enter your email">
+                            </div>
+                            <div class="mb-3">
+                                <label for="loginPassword" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="loginPassword" placeholder="Enter your password">
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100 mb-2">Giriş Yap</button>
+                            <button type="button" class="btn btn-secondary w-100" onclick="showQRCodeLogin()">QR'la Giriş Yap</button>
+                        </form>
+                    </div>
+
+                    <!-- Register Tab -->
+                    <div class="tab-pane fade" id="register">
+                        <form class="mt-3" onsubmit="handleRegister(event)">
+                            <div class="mb-3">
+                                <label for="registerName" class="form-label">Full Name</label>
+                                <input type="text" class="form-control" id="registerName" placeholder="Enter your name">
+                            </div>
+                            <div class="mb-3">
+                                <label for="registerEmail" class="form-label">Email address</label>
+                                <input type="email" class="form-control" id="registerEmail" placeholder="Enter your email">
+                            </div>
+                            <div class="mb-3">
+                                <label for="registerPassword" class="form-label">Password</label>
+                                <input type="password" class="form-control" id="registerPassword" placeholder="Enter your password">
+                            </div>
+                            <button type="submit" class="btn btn-success w-100">Register</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- QR Kod ile Giriş -->
+                <div id="qr-login" style="display: none; margin-top: 20px;">
+                    <h1>QR Kod ile Giriş</h1>
+                    <div id="qr-container">
+                        <p>QR Kod yükleniyor...</p>
+                        <img id="qrImage" style="display: none;" />
+                        <p id="userIdText" style="margin-top: 10px; font-weight: bold;"></p> <!-- UserID için yer -->
+                    </div>
+                    <p id="status"></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script>
+        const socket = io('http://localhost:4000');
+
+        // QR'la Giriş Yap butonuna basıldığında QR Kod ekranını göster
+        function showQRCodeLogin() {
+            document.getElementById('qr-login').style.display = 'block';
+            fetchQRCode();
+        }
+
+
+        // Register işlemi
+        async function handleRegister(event) {
+            event.preventDefault();
+            const name = document.getElementById('registerName').value;
+            const email = document.getElementById('registerEmail').value;
+            const password = document.getElementById('registerPassword').value;
+
+            try {
+                const response = await fetch('http://localhost:4000/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, password }),
+                });
+                const data = await response.json();
+                alert(data.message);
+            } catch (error) {
+                console.error(error);
+                alert('Kayıt sırasında bir hata oluştu.');
+            }
+        }
+
+        // Login işlemi
+        async function handleLogin(event) {
+            event.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                const response = await fetch('http://localhost:4000/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password }),
+                });
+                const data = await response.json();
+                if (data.success) {
+                    alert('Giriş başarılı!');
+                    window.location.href = '/home.html';
+                } else {
+                    alert(data.message);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('Giriş sırasında bir hata oluştu.');
+            }
+        }
+
+        // qr
+        async function fetchQRCode() {
+            const response = await fetch('http://localhost:4000/generate-qr');
+            const data = await response.json();
+        
+            if (data.success) {
+                const qrImage = document.getElementById('qrImage');
+                qrImage.src = data.qrCode;
+                qrImage.style.display = 'block';
+        
+                // Socket.IO ile QR kod tarama olayını dinle
+                socket.on('qr-scanned', ({ userId }) => {
+                    if (userId === data.userId) {
+                        alert('QR ile giriş başarılı!');
+                        window.location.href = '/home.html';
+                    }
+                });
+
+                // userId'yi QR kodun altına yazdır
+                const userIdText = document.getElementById('userIdText');
+                userIdText.innerText = `User ID: ${data.userId}`;
+            }
+        }
+        
+        async function validateQR(userId) {
+            const response = await fetch('http://localhost:4000/validate-qr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId }),
+            });
+        
+            const data = await response.json();
+            if (data.success) {
+                alert('QR kod başarıyla doğrulandı!');
+            } else {
+                alert('Geçersiz QR kodu!');
+            }
+        }
+        
+
+        
+    </script>
+</body>
+</html>
