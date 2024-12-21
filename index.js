@@ -6,6 +6,7 @@ const cors = require('cors');
 const path = require('path');
 const sequelize = require('./database');
 const User = require('./models/User');
+const crypto = require('crypto');
 
 const app = express();
 app.use(cors());
@@ -25,6 +26,21 @@ const io = new Server(server, {
 const PORT = 4000;
 const sessions = {};
 
+// Şifreleme fonksiyonu
+function encryptSessionId(sessionId) {
+  const algorithm = 'aes-256-ctr';
+  const secretKey = 'vOVH6sdmpNWjRRIqCc7rdxs01lwHzfr3';
+  const iv = crypto.randomBytes(16);
+
+  const cipher = crypto.createCipheriv(algorithm, secretKey, iv);
+  const encrypted = Buffer.concat([cipher.update(sessionId), cipher.final()]);
+
+  return {
+    iv: iv.toString('hex'),
+    content: encrypted.toString('hex')
+  };
+}
+
 // Login sayfasını göstermek için '/' endpoint
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public/index.html')); // Ana sayfa
@@ -33,9 +49,9 @@ app.get('/', (req, res) => {
 // QR kod üretme endpoint
 app.get('/generate-qr', async (req, res) => {
   const userId = Math.random().toString(36).substring(2, 10);
-  const qrCodeContent = JSON.stringify({ userId });
+  const qrCodeContent = JSON.stringify(encryptSessionId(userId));
 
-  sessions[userId] = { authenticated: false };
+  sessions[userId] = { authenticated: false, expiresAt: Date.now() + 60000 }; // 1 dakika geçerlilik
 
   try {
     const qrCodeImage = await QRCode.toDataURL(qrCodeContent);
@@ -43,6 +59,24 @@ app.get('/generate-qr', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// QR kod doğrulama endpoint'i
+app.post('/validate-qr', (req, res) => {
+  const { userId } = req.body;
+
+  const session = sessions[userId];
+  if (!session || Date.now() > session.expiresAt) {
+    return res.status(400).json({ success: false, message: 'Geçersiz veya süresi dolmuş QR kodu!' });
+  }
+
+  // Kullanıcı doğrulandı
+  session.authenticated = true;
+
+  // QR tarama olayını tetikle
+  io.emit('qr-scanned', { userId });
+
+  res.json({ success: true, message: 'QR kod başarıyla tarandı!' });
 });
 
 // QR ile giriş kontrolü (Socket.IO)
@@ -54,38 +88,22 @@ io.on('connection', (socket) => {
   });
 
   socket.on('scan-qr', ({ userId }) => {
-    if (!userId || !sessions[userId]) {
+    const session = sessions[userId];
+    if (!session) {
       socket.emit('auth-failure', { message: 'Geçersiz QR kodu!' });
       return;
     }
 
-    sessions[userId].authenticated = true;
+    if (Date.now() > session.expiresAt) {
+      socket.emit('auth-failure', { message: 'QR kodun süresi doldu!' });
+      return;
+    }
+
+    session.authenticated = true;
     socket.emit('auth-success', { message: 'Giriş başarılı!' });
     io.emit('user-authenticated', { userId });
   });
 });
-
-// QR kod doğrulama endpoint'i
-app.post('/validate-qr', (req, res) => {
-  const { userId } = req.body;
-
-  if (!sessions[userId]) {
-    return res.status(400).json({ success: false, message: 'Geçersiz QR kodu!' });
-  }
-
-  // Kullanıcı doğrulandı
-  sessions[userId].authenticated = true;
-
-  // QR tarama olayını tetikle
-  io.emit('qr-scanned', { userId });
-
-  res.json({ success: true, message: 'QR kod başarıyla tarandı!' });
-});
-
-
-
-
-
 
 // Register endpoint
 app.post('/register', async (req, res) => {
